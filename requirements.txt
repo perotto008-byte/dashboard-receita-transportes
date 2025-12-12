@@ -1,10 +1,7 @@
-HEAD
 streamlit
 pandas
 numpy
 plotly
-streamlit
-pandas
-numpy
-plotly
-0f6995b7c8ca83f8cbb4a166cfb6c66824138e5e
+requests
+
+
