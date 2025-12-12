@@ -2,11 +2,15 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+from streamlit_autorefresh import st_autorefresh
 
 # =============================
 # CONFIG (APENAS UMA VEZ)
 # =============================
 st.set_page_config(page_title="Dashboard | Receita Transportes", layout="wide")
+
+st_autorefresh(interval=5_000, key="auto_refresh")
+
 
 SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQGkFzhy469J3SQo4xoY7tHEEopnAJLdKThEtsFIXPeaUqUMjXkCOdddDsT3r9CUK2Wsnl_c4lbYLy4/pub?output=csv"
 META_MENSAL = 3_000_000.0
@@ -179,7 +183,9 @@ def delta_text(delta):
 # Load data (Google Sheets CSV)
 # =============================
 @st.cache_data(ttl=60)
+@st.cache_data(ttl=5)
 def load_df_from_sheets(url: str) -> pd.DataFrame:
+
     df_raw = pd.read_csv(url)
 
     if df_raw.shape[1] < 8:
