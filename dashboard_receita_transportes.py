@@ -1,16 +1,16 @@
-import re
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 
 # =============================
-# CONFIG
+# CONFIG (APENAS UMA VEZ)
 # =============================
 st.set_page_config(page_title="Dashboard | Receita Transportes", layout="wide")
 
 SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQGkFzhy469J3SQo4xoY7tHEEopnAJLdKThEtsFIXPeaUqUMjXkCOdddDsT3r9CUK2Wsnl_c4lbYLy4/pub?output=csv"
-META_MENSAL_PADRAO = 3_000_000
+META_MENSAL = 3_000_000.0
+
 
 # =============================
 # CSS (layout parecido com seu mockup)
@@ -36,69 +36,56 @@ section[data-testid="stSidebar"] {
   border-right: 1px solid rgba(255,255,255,0.08);
 }
 
-/* Botões da sidebar mais “ícone” */
+/* Botões da sidebar */
 div.sidebar-btn button {
   width: 52px !important;
   height: 52px !important;
-
   border-radius: 16px !important;
   border: 1px solid rgba(255,255,255,0.16) !important;
-
   background: rgba(255,255,255,0.05) !important;
-
-  font-size: 18px !important;   /* 👈 padronizado */
+  font-size: 18px !important;
   line-height: 1 !important;
-
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
 }
-
 div.sidebar-btn button:hover {
   border-color: rgba(180,255,0,0.55) !important;
   background: rgba(180,255,0,0.10) !important;
 }
 
-/* Cards (métricas) */
+/* Cards (KPIs) */
 .kpi-card {
   border: 1px solid rgba(255,255,255,0.14);
   background: rgba(255,255,255,0.04);
   border-radius: 18px;
   padding: 14px 16px;
-  height: 100px;
+  height: 104px;
 
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   gap: 6px;
-
   overflow: hidden;
 }
-
 .kpi-title {
   color: rgba(255,255,255,0.75);
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
 }
-
 .kpi-value {
   color: rgba(255,255,255,0.95);
-  font-size: 26px;          /* 👈 reduzido */
+  font-size: 26px;
   font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;  /* 👈 evita quebrar card */
+  text-overflow: ellipsis;
 }
-
 .kpi-delta {
   font-size: 12px;
   line-height: 1;
-}
-
-.kpi-delta {
-  font-size: 12px;
   color: rgba(255,255,255,0.65);
 }
 .kpi-good { color: rgba(140,255,160,0.95); }
@@ -123,36 +110,16 @@ div.sidebar-btn button:hover {
 
 /* Esconde header do Streamlit */
 header[data-testid="stHeader"] { background: transparent; }
-
-/* ===============================
-   PADRONIZA ÍCONES DOS TÍTULOS
-================================ */
-h3 span.icon,
-.kpi-title span.icon {
-  font-size: 16px;
-  margin-right: 6px;
-  vertical-align: middle;
-}
-
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+
 # =============================
 # Helpers: conversões BR / %
 # =============================
 def brl_to_float(x):
-    
-st.set_page_config(page_title="Dashboard | Receita Transportes", layout="wide")
-st.title("🚚 Dashboard de Receita — Transportes")
-
-# =============================
-# Utilitários de conversão
-# =============================
-def brl_to_float(x):
-    """Converte 'R$ 57.375,00' -> 57375.00. Se já for número, mantém."""
-
     if pd.isna(x):
         return np.nan
     if isinstance(x, (int, float, np.number)):
@@ -167,11 +134,9 @@ def brl_to_float(x):
     except Exception:
         return np.nan
 
+
 def pct_to_float(x):
-
-
-    """Converte '32,9%' -> 0.329. Se vier 32.9, vira 0.329. Se vier 0.329, mantém."""
-
+    """'32,9%' -> 0.329 ; 32.9 -> 0.329 ; 0.329 -> 0.329"""
     if pd.isna(x):
         return np.nan
     if isinstance(x, (int, float, np.number)):
@@ -188,6 +153,7 @@ def pct_to_float(x):
     except Exception:
         return np.nan
 
+
 def fmt_brl(v):
     if pd.isna(v):
         return "—"
@@ -196,10 +162,18 @@ def fmt_brl(v):
 
 
 def compute_delta(curr, prev):
-    """Retorna delta percentual (ex.: +0.12 = +12%)."""
     if prev is None or pd.isna(prev) or prev == 0 or pd.isna(curr):
         return None
     return (curr - prev) / abs(prev)
+
+
+def delta_text(delta):
+    if delta is None:
+        return "<span class='kpi-delta'>—</span>"
+    sign = "+" if delta >= 0 else ""
+    cls = "kpi-good" if delta >= 0 else "kpi-bad"
+    return f"<span class='kpi-delta {cls}'>{sign}{delta*100:.1f}% desde a semana passada</span>"
+
 
 # =============================
 # Load data (Google Sheets CSV)
@@ -208,7 +182,6 @@ def compute_delta(curr, prev):
 def load_df_from_sheets(url: str) -> pd.DataFrame:
     df_raw = pd.read_csv(url)
 
-    # Espera 8 colunas A..H, mas aceita se tiver mais
     if df_raw.shape[1] < 8:
         raise ValueError("CSV precisa ter pelo menos 8 colunas (A até H).")
 
@@ -224,9 +197,8 @@ def load_df_from_sheets(url: str) -> pd.DataFrame:
         "comissao",
     ]
 
-    # DIA: extrair número do dia
+    # DIA -> número (suporta datetime, serial Excel, "01/dez")
     dia_raw = df["dia"]
-
     if pd.api.types.is_datetime64_any_dtype(dia_raw):
         df["dia"] = pd.to_datetime(dia_raw, errors="coerce").dt.day
     else:
@@ -238,23 +210,25 @@ def load_df_from_sheets(url: str) -> pd.DataFrame:
             df["dia"] = dia_raw.astype(str).str.extract(r"(\d{1,2})")[0]
             df["dia"] = pd.to_numeric(df["dia"], errors="coerce")
 
-    df = df.dropna(subset=["dia"])
+    df = df.dropna(subset=["dia"]).copy()
     df["dia"] = df["dia"].astype(int)
 
-    # Valores
+    # Converte valores BRL
     for col in ["faturado_dia", "acumulado_mes", "projecao_mes", "diferenca_meta", "comissao"]:
         df[col] = df[col].apply(brl_to_float)
 
+    # Converte percentuais
     df["percentual_meta"] = df["percentual_meta"].apply(pct_to_float)
     df["percentual_projecao"] = df["percentual_projecao"].apply(pct_to_float)
 
     df = df.sort_values("dia").reset_index(drop=True)
 
-    # Se "dia" colapsou (ex.: tudo = 20), usa dia sequencial 1..N
+    # Se colapsou tudo num mesmo dia (ruim), cria dia sequencial
     if df["dia"].nunique(dropna=True) <= 1 and len(df) > 1:
         df["dia"] = np.arange(1, len(df) + 1)
 
     return df
+
 
 # =============================
 # Sidebar: navegação por ícones
@@ -263,29 +237,37 @@ if "page" not in st.session_state:
     st.session_state.page = "dashboard"
 
 st.sidebar.markdown("##")
-st.sidebar.markdown("##")  # espaço
+st.sidebar.markdown("##")
+
 
 def nav_btn(icon: str, key: str, tooltip: str):
-    with st.sidebar:
-        st.markdown('<div class="sidebar-btn">', unsafe_allow_html=True)
-        if st.button(icon, key=key, help=tooltip):
-            st.session_state.page = key
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.sidebar.markdown('<div class="sidebar-btn">', unsafe_allow_html=True)
+    if st.sidebar.button(icon, key=key, help=tooltip):
+        st.session_state.page = key
+    st.sidebar.markdown("</div>", unsafe_allow_html=True)
+
 
 nav_btn("⦿", "dashboard", "Dashboard (visão geral)")
 nav_btn("👤", "motoristas", "Motoristas (em breve)")
 nav_btn("🚚", "placas", "Placas (em breve)")
 nav_btn("💬", "chat", "Chat (em breve)")
 
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Configurações")
+show_debug = st.sidebar.checkbox("Mostrar Debug", value=False)
+
+
 # =============================
-# Topo: título + seletor de período
+# Header + Filtro no topo
 # =============================
-top_l, top_r = st.columns([0.7, 0.3], vertical_alignment="center")
+st.title("🚚 Dashboard de Receita — Transportes")
+
+top_l, top_r = st.columns([0.70, 0.30], vertical_alignment="center")
 
 with top_l:
     st.markdown("## Dashboard")
 
-# Carrega dados
+# Carrega dados (UMA VEZ)
 try:
     df = load_df_from_sheets(SHEETS_CSV_URL)
 except Exception as e:
@@ -294,27 +276,19 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# Filtro de dia (modo intervalo ou dia único)
+# Filtro no topo direito
 with top_r:
-    # “Pill” no canto direito
-    st.markdown(
-        """
-        <div style="display:flex; justify-content:flex-end; gap:10px; align-items:center;">
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     modo = st.selectbox("Período", ["Intervalo", "Dia único"], label_visibility="collapsed")
+
     dmin = int(df["dia"].min())
     dmax = int(df["dia"].max())
 
     if modo == "Dia único":
         if dmin == dmax:
-            dia_sel = dmin
+            d0, d1 = dmin, dmax
         else:
-            dia_sel = st.selectbox("Dia", list(range(dmin, dmax + 1)), index=len(list(range(dmin, dmax + 1))) - 1, label_visibility="collapsed")
-        d0, d1 = dia_sel, dia_sel
+            dia_sel = st.selectbox("Dia", list(range(dmin, dmax + 1)), index=(dmax - dmin), label_visibility="collapsed")
+            d0, d1 = dia_sel, dia_sel
     else:
         if dmin == dmax:
             d0, d1 = dmin, dmax
@@ -322,55 +296,94 @@ with top_r:
             d0, d1 = st.slider("Dia do mês", min_value=dmin, max_value=dmax, value=(dmin, dmax), label_visibility="collapsed")
 
 df_f = df[(df["dia"] >= d0) & (df["dia"] <= d1)].copy()
+
 if df_f.empty:
     st.warning("Sem dados no período selecionado.")
     st.stop()
 
+
 # =============================
-# Páginas (por enquanto só dashboard)
+# Páginas (placeholder)
 # =============================
 if st.session_state.page != "dashboard":
-    st.info("🚧 Esta aba está em construção. Por enquanto, refizemos a página principal (Dashboard).")
+    st.info("🚧 Esta aba está em construção. Por enquanto, a visão geral (Dashboard) está pronta.")
+    if show_debug:
+        st.write("Página atual:", st.session_state.page)
     st.stop()
 
-# =============================
-# KPIs (4 cards)
-# =============================
-# Último dia válido no recorte
-df_kpi = df_f.dropna(subset=["acumulado_mes"]).copy()
-if df_kpi.empty:
-    st.error("Não encontrei valores em 'acumulado_mes' no período selecionado.")
-    st.stop()
-ultimo = df_kpi.iloc[-1]
 
-meta = META_MENSAL_PADRAO
-fat_mes = ultimo["acumulado_mes"]
-pct_meta = (fat_mes / meta) if (not pd.isna(fat_mes) and meta > 0) else np.nan
-proj = ultimo["projecao_mes"]
-diff = ultimo["diferenca_meta"]
-com = ultimo["comissao"]
+# =============================
+# KPIs (SEM DUPLICAR)
+# =============================
+# =============================
+# KPIs – SEM depender do último dia
+# =============================
 
-# Delta (comparação simples: últimos 7 dias vs 7 anteriores dentro do dataset total)
+# usa SEMPRE o maior acumulado disponível no período
+fat_mes = (
+    df_f["acumulado_mes"]
+    .dropna()
+    .max()
+    if df_f["acumulado_mes"].notna().any()
+    else np.nan
+)
+
+proj_mes = (
+    df_f["projecao_mes"]
+    .dropna()
+    .max()
+    if df_f["projecao_mes"].notna().any()
+    else np.nan
+)
+
+com_acum = (
+    df_f["comissao"]
+    .dropna()
+    .max()
+    if df_f["comissao"].notna().any()
+    else np.nan
+)
+
+dif_meta = (
+    proj_mes - META_MENSAL
+    if not pd.isna(proj_mes)
+    else np.nan
+)
+
+pct_meta = (
+    fat_mes / META_MENSAL
+    if not pd.isna(fat_mes) and META_MENSAL
+    else np.nan
+)
+
+
+# Deltas simples: últimos 7 dias vs 7 anteriores (pela coluna faturado_dia)
 def last7_vs_prev7(series_col: str):
     tmp = df.dropna(subset=[series_col]).copy()
-    if tmp.empty or tmp["dia"].nunique() < 7:
+    if tmp.empty or len(tmp) < 14:
         return None
     tmp = tmp.sort_values("dia")
     last7 = tmp.tail(7)[series_col].sum()
-    prev7 = tmp.iloc[max(0, len(tmp)-14):max(0, len(tmp)-7)][series_col].sum()
+    prev7 = tmp.iloc[-14:-7][series_col].sum()
     return compute_delta(last7, prev7)
 
 delta_fat = last7_vs_prev7("faturado_dia")
-delta_proj = compute_delta(proj, df.dropna(subset=["projecao_mes"]).tail(2)["projecao_mes"].head(1).values[0]) if df.dropna(subset=["projecao_mes"]).shape[0] >= 2 else None
-delta_com  = compute_delta(com, df.dropna(subset=["comissao"]).tail(2)["comissao"].head(1).values[0]) if df.dropna(subset=["comissao"]).shape[0] >= 2 else None
-delta_pct  = compute_delta(pct_meta, (df.dropna(subset=["acumulado_mes"]).tail(2)["acumulado_mes"].head(1).values[0] / meta) if df.dropna(subset=["acumulado_mes"]).shape[0] >= 2 else None)
 
-def delta_text(delta):
-    if delta is None:
-        return "<span class='kpi-delta'>—</span>"
-    sign = "+" if delta >= 0 else ""
-    cls = "kpi-good" if delta >= 0 else "kpi-bad"
-    return f"<span class='kpi-delta {cls}'>{sign}{delta*100:.1f}% desde a semana passada</span>"
+# delta % meta (compara fat_mes atual vs fat_mes de 7 dias atrás se existir)
+tmp_ac = df.dropna(subset=["acumulado_mes"]).sort_values("dia")
+if len(tmp_ac) >= 8:
+    prev_fat = tmp_ac.iloc[-8]["acumulado_mes"]
+    delta_pct = compute_delta(pct_meta, (prev_fat / META_MENSAL) if META_MENSAL else None)
+else:
+    delta_pct = None
+
+# delta projeção e comissão (último vs penúltimo)
+tmp_proj = df.dropna(subset=["projecao_mes"]).sort_values("dia")
+delta_proj = compute_delta(tmp_proj.iloc[-1]["projecao_mes"], tmp_proj.iloc[-2]["projecao_mes"]) if len(tmp_proj) >= 2 else None
+
+tmp_com = df.dropna(subset=["comissao"]).sort_values("dia")
+delta_com = compute_delta(tmp_com.iloc[-1]["comissao"], tmp_com.iloc[-2]["comissao"]) if len(tmp_com) >= 2 else None
+
 
 c1, c2, c3, c4 = st.columns(4, gap="large")
 
@@ -404,7 +417,7 @@ with c3:
         f"""
         <div class="kpi-card">
           <div class="kpi-title">Projeção (mês)</div>
-          <div class="kpi-value">{fmt_brl(proj)}</div>
+          <div class="kpi-value">{fmt_brl(proj_mes)}</div>
           {delta_text(delta_proj)}
         </div>
         """,
@@ -416,7 +429,7 @@ with c4:
         f"""
         <div class="kpi-card">
           <div class="kpi-title">Comissão (acumulada)</div>
-          <div class="kpi-value">{fmt_brl(com)}</div>
+          <div class="kpi-value">{fmt_brl(com_acum)}</div>
           {delta_text(delta_com)}
         </div>
         """,
@@ -425,12 +438,13 @@ with c4:
 
 st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
+
 # =============================
-# Painéis inferiores (donut + linha)
+# Painéis: Donut + Linha
 # =============================
 p1, p2 = st.columns([0.42, 0.58], gap="large")
 
-# Donut: meta atingida x restante (com base no acumulado)
+# Donut Meta
 with p1:
     st.markdown(
         """
@@ -441,22 +455,13 @@ with p1:
         """,
         unsafe_allow_html=True,
     )
-    # container para o gráfico dentro do painel
-    panel_placeholder = st.container()
 
-    atingido = float(fat_mes) if not pd.isna(fat_mes) else 0.0
-    restante = max(0.0, float(meta) - atingido)
+    atingido = 0.0 if pd.isna(fat_mes) else float(fat_mes)
+    restante = max(0.0, float(META_MENSAL) - atingido)
 
-    donut_df = pd.DataFrame(
-        {"status": ["Atingido", "Restante"], "valor": [atingido, restante]}
-    )
+    donut_df = pd.DataFrame({"status": ["Atingido", "Restante"], "valor": [atingido, restante]})
 
-    fig_donut = px.pie(
-        donut_df,
-        names="status",
-        values="valor",
-        hole=0.70,
-    )
+    fig_donut = px.pie(donut_df, names="status", values="valor", hole=0.70)
     fig_donut.update_traces(textposition="inside", textinfo="percent+label")
     fig_donut.update_layout(
         height=360,
@@ -466,9 +471,9 @@ with p1:
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="rgba(255,255,255,0.85)"),
     )
-    panel_placeholder.plotly_chart(fig_donut, use_container_width=True)
+    st.plotly_chart(fig_donut, use_container_width=True)
 
-# Linha: acumulado no mês por dia (max por dia)
+# Linha Acumulado
 with p2:
     st.markdown(
         """
@@ -479,154 +484,10 @@ with p2:
         """,
         unsafe_allow_html=True,
     )
+
     ac = df_f.groupby("dia", as_index=False)["acumulado_mes"].max()
 
-    fig_line = px.line
-
-# =============================
-# Sidebar: upload
-# =============================
-st.sidebar.header("⚙️ Configurações")
-
-SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQGkFzhy469J3SQo4xoY7tHEEopnAJLdKThEtsFIXPeaUqUMjXkCOdddDsT3r9CUK2Wsnl_c4lbYLy4/pub?output=csv"
-
-try:
-    df_raw = pd.read_csv(SHEETS_CSV_URL)
-except Exception as e:
-    st.error("Erro ao carregar dados do Google Sheets (CSV).")
-    st.exception(e)
-    st.stop()
-
-
-# Espera 8 colunas A..H conforme sua estrutura
-# A Dia | B Faturado | C Acumulado | D % Meta | E Projeção | F Diferença | G % Projeção | H Comissão
-if df_raw.shape[1] < 8:
-    st.error("A planilha precisa ter pelo menos 8 colunas (A até H) conforme a estrutura combinada.")
-    st.stop()
-
-df = df_raw.iloc[:, :8].copy()
-df.columns = [
-    "dia",
-    "faturado_dia",
-    "acumulado_mes",
-    "percentual_meta",
-    "projecao_mes",
-    "diferenca_meta",
-    "percentual_projecao",
-    "comissao",
-]
-
-# =============================
-# Tratamento do DIA (coluna A)
-# =============================
-dia_raw = df["dia"]
-
-# Caso 1: se já é datetime
-if pd.api.types.is_datetime64_any_dtype(dia_raw):
-    df["dia"] = pd.to_datetime(dia_raw, errors="coerce").dt.day
-
-else:
-    # tenta numérico
-    dia_num = pd.to_numeric(dia_raw, errors="coerce")
-
-    # Caso 2: número grande (serial do Excel ou data numérica)
-    if dia_num.notna().any() and dia_num.max() > 31:
-        dtv = pd.to_datetime(dia_num, unit="D", origin="1899-12-30", errors="coerce")
-        df["dia"] = dtv.dt.day
-    else:
-        # Caso 3: string tipo "01/dez"
-        df["dia"] = dia_raw.astype(str).str.extract(r"(\d{1,2})")[0]
-        df["dia"] = pd.to_numeric(df["dia"], errors="coerce")
-
-df = df.dropna(subset=["dia"])
-df["dia"] = df["dia"].astype(int)
-
-# Se o "dia" colapsou (todo mundo virou o mesmo dia), cria dia sequencial pela ordem das linhas
-dias_unicos = df["dia"].nunique(dropna=True)
-if dias_unicos <= 1 and len(df) > 1:
-    st.warning("⚠️ A coluna 'dia' veio repetida. Vou usar a ordem das linhas como dia 1..N.")
-    df = df.sort_index().reset_index(drop=True)
-    df["dia"] = np.arange(1, len(df) + 1)
-
-
-# =============================
-# Conversão de valores (R$ e %)
-# =============================
-for col in ["faturado_dia", "acumulado_mes", "projecao_mes", "diferenca_meta", "comissao"]:
-    df[col] = df[col].apply(brl_to_float)
-
-df["percentual_meta"] = df["percentual_meta"].apply(pct_to_float)
-df["percentual_projecao"] = df["percentual_projecao"].apply(pct_to_float)
-
-# Ordena por dia
-df = df.sort_values("dia").reset_index(drop=True)
-
-# =============================
-# Filtros
-# =============================
-st.sidebar.subheader("Filtros")
-
-dmin = int(df["dia"].min())
-dmax = int(df["dia"].max())
-
-if dmin == dmax:
-    # Só existe um dia no dataset (min == max), então slider quebra.
-    st.sidebar.info(f"Apenas um dia disponível: {dmin}")
-    d0, d1 = dmin, dmax
-else:
-    d0, d1 = st.sidebar.slider(
-        "Dia do mês",
-        min_value=dmin,
-        max_value=dmax,
-        value=(dmin, dmax),
-    )
-
-df_f = df[(df["dia"] >= d0) & (df["dia"] <= d1)].copy()
-
-if df_f.empty:
-    st.warning("Nenhum dado no período selecionado.")
-    st.stop()
-
-# =============================
-# KPIs (última linha com acumulado)
-# =============================
-df_kpi = df_f.dropna(subset=["acumulado_mes"]).copy()
-if df_kpi.empty:
-    st.error("Não encontrei valores em 'acumulado_mes' (coluna C). Verifique se há valores nessa coluna.")
-    st.stop()
-
-ultimo = df_kpi.iloc[-1]
-
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("💰 Faturamento do mês", fmt_brl(ultimo["acumulado_mes"]))
-k2.metric("🎯 % da Meta", "—" if pd.isna(ultimo["percentual_meta"]) else f"{ultimo['percentual_meta']*100:.1f}%")
-k3.metric("📈 Projeção do mês", fmt_brl(ultimo["projecao_mes"]))
-k4.metric("📊 Diferença da Meta", fmt_brl(ultimo["diferenca_meta"]))
-k5.metric("🤝 Comissão acumulada", fmt_brl(ultimo["comissao"]))
-
-st.divider()
-
-# =============================
-# Gráficos
-# =============================
-g1, g2 = st.columns(2, gap="large")
-
-with g1:
-    st.subheader("🧾 Faturamento diário")
-    fat = df_f.groupby("dia", as_index=False)["faturado_dia"].sum()
-    fig1 = px.bar(
-        fat,
-        x="dia",
-        y="faturado_dia",
-        labels={"dia": "Dia do mês", "faturado_dia": "Faturado (R$)"},
-    )
-    st.plotly_chart(fig1, use_container_width=True)
-
-with g2:
-    st.subheader("📈 Acumulado no mês")
-    ac = df_f.groupby("dia", as_index=False)["acumulado_mes"].max()
-    fig2 = px.line(
-
+    fig_line = px.line(
         ac,
         x="dia",
         y="acumulado_mes",
@@ -648,7 +509,7 @@ with g2:
 st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
 # =============================
-# Extra: faturamento diário (bar) embaixo (opcional, mas útil)
+# Painel extra: Faturamento diário (barra)
 # =============================
 st.markdown(
     """
@@ -659,6 +520,7 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
 fat = df_f.groupby("dia", as_index=False)["faturado_dia"].sum()
 fig_bar = px.bar(
     fat,
@@ -678,45 +540,15 @@ fig_bar.update_layout(
 st.plotly_chart(fig_bar, use_container_width=True)
 
 # =============================
-# Rodapé: tabela (debug/controle)
+# Debug / Tabela (opcional)
 # =============================
+if show_debug:
+    with st.expander("🔎 Debug (ver dados que o app está lendo)", expanded=False):
+        st.write("df shape:", df.shape)
+        st.write("df_f shape:", df_f.shape)
+        st.write("colunas:", list(df.columns))
+        st.dataframe(df.head(20), use_container_width=True)
+        st.dataframe(df_f.head(20), use_container_width=True)
+
 with st.expander("📋 Ver dados (tabela)", expanded=False):
-    st.dataframe(df_f, use_container_width=True, height=380)
-
-    st.plotly_chart(fig2, use_container_width=True)
-
-st.divider()
-
-g3, g4 = st.columns(2, gap="large")
-
-with g3:
-    st.subheader("🚀 Projeção × Meta")
-    fig3 = px.line(
-        df_f,
-        x="dia",
-        y="projecao_mes",
-        markers=True,
-        labels={"dia": "Dia do mês", "projecao_mes": "Projeção (R$)"},
-    )
-    fig3.add_hline(y=3000000, line_dash="dash", annotation_text="Meta (3.000.000)")
-    st.plotly_chart(fig3, use_container_width=True)
-
-with g4:
-    st.subheader("📊 % da Meta (acumulado)")
-    fig4 = px.line(
-        df_f,
-        x="dia",
-        y="percentual_meta",
-        markers=True,
-        labels={"dia": "Dia do mês", "percentual_meta": "% da meta (base 1)"},
-    )
-    st.plotly_chart(fig4, use_container_width=True)
-
-st.divider()
-
-# =============================
-# Tabela
-# =============================
-st.subheader("📋 Dados detalhados")
-st.dataframe(df_f, use_container_width=True, height=420)
-
+    st.dataframe(df_f, use_container_width=True, height=420)
