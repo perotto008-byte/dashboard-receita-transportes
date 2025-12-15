@@ -2,8 +2,8 @@ streamlit
 pandas
 numpy
 plotly
-requests
-streamlit-autorefresh
+openai
+
 
 
 
